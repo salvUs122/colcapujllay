@@ -11,47 +11,56 @@ import colca6 from './assets/images/colca6.png';
 import colca7 from './assets/images/colca7.png';
 
 const TICKET_TYPES = [
-  {
-    key: 'general',
-    name: 'General de 12 a 60 años',
-    price: 25,
-    image: colca2,
-  },
-  {
-    key: 'ninos',
-    name: 'Niños de 6 a 12 años',
-    price: 10,
-    image: colca6,
-  },
-  {
-    key: 'mayores',
-    name: 'Adultos mayores',
-    price: 20,
-    image: colca5,
-  },
+  { key: 'general', name: 'General de 12 a 60 años', price: 25, image: colca2 },
+  { key: 'ninos', name: 'Niños de 6 a 12 años', price: 10, image: colca6 },
+  { key: 'mayores', name: 'Adultos mayores', price: 20, image: colca5 },
 ];
+
+const LOGIN_USER = 'demo';
+const LOGIN_PASSWORD = 'demo';
+
+const getTicketSummary = (quantities) =>
+  TICKET_TYPES.filter((ticketType) => quantities[ticketType.key] > 0)
+    .map((ticketType) => `${ticketType.name}: ${quantities[ticketType.key]}`)
+    .join(' | ');
+
+const getTotalAmount = (quantities) =>
+  TICKET_TYPES.reduce((acc, ticketType) => acc + quantities[ticketType.key] * ticketType.price, 0);
+
+const generateCode = (prefix) => `${prefix}-${Date.now().toString().slice(-7)}`;
+
+const buildQrUrl = (payload) =>
+  `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(payload)}`;
 
 function App() {
   const heroImages = [colca1, colca2, colca3, colca4, colca5, colca6, colca7];
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [currentScreen, setCurrentScreen] = useState('home');
-  const [customerData, setCustomerData] = useState({
+
+  const [onlineCustomer, setOnlineCustomer] = useState({
     fullName: '',
     idNumber: '',
     phone: '',
     email: '',
   });
-  const [cashierCredentials, setCashierCredentials] = useState({
-    user: '',
-    password: '',
+  const [onlineQuantities, setOnlineQuantities] = useState({ general: 0, ninos: 0, mayores: 0 });
+  const [onlineOrder, setOnlineOrder] = useState(null);
+  const [onlineInvoice, setOnlineInvoice] = useState(null);
+  const [onlineMessage, setOnlineMessage] = useState('');
+
+  const [cashierCredentials, setCashierCredentials] = useState({ user: '', password: '' });
+  const [cashierLoggedIn, setCashierLoggedIn] = useState(false);
+  const [cashierCustomer, setCashierCustomer] = useState({
+    fullName: '',
+    idNumber: '',
+    phone: '',
+    email: '',
   });
-  const [quantities, setQuantities] = useState({
-    general: 0,
-    ninos: 0,
-    mayores: 0,
-  });
-  const [order, setOrder] = useState(null);
-  const [feedback, setFeedback] = useState('');
+  const [cashierQuantities, setCashierQuantities] = useState({ general: 0, ninos: 0, mayores: 0 });
+  const [cashierPaymentMethod, setCashierPaymentMethod] = useState('qr');
+  const [cashierQr, setCashierQr] = useState('');
+  const [cashierInvoice, setCashierInvoice] = useState(null);
+  const [cashierMessage, setCashierMessage] = useState('');
 
   useEffect(() => {
     if (currentScreen !== 'home') {
@@ -65,107 +74,171 @@ function App() {
     return () => clearInterval(interval);
   }, [currentScreen, heroImages.length]);
 
-  const totalTickets = useMemo(
-    () => Object.values(quantities).reduce((acc, value) => acc + value, 0),
-    [quantities]
+  const onlineTotalTickets = useMemo(
+    () => Object.values(onlineQuantities).reduce((acc, value) => acc + value, 0),
+    [onlineQuantities]
   );
-
-  const totalAmount = useMemo(
-    () =>
-      TICKET_TYPES.reduce(
-        (acc, ticketType) => acc + quantities[ticketType.key] * ticketType.price,
-        0
-      ),
-    [quantities]
-  );
+  const onlineTotalAmount = useMemo(() => getTotalAmount(onlineQuantities), [onlineQuantities]);
+  const cashierTotalAmount = useMemo(() => getTotalAmount(cashierQuantities), [cashierQuantities]);
 
   const goToScreen = (screenName) => {
     setCurrentScreen(screenName);
-    setFeedback('');
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   };
 
-  const handleQuantityChange = (ticketKey, nextValue) => {
-    const validValue = Math.max(0, Number(nextValue) || 0);
-    setQuantities((prev) => ({ ...prev, [ticketKey]: validValue }));
-    setOrder(null);
-    setFeedback('');
+  const handleOnlineQuantity = (ticketKey, value) => {
+    const nextValue = Math.max(0, Number(value) || 0);
+    setOnlineQuantities((prev) => ({ ...prev, [ticketKey]: nextValue }));
+    setOnlineOrder(null);
+    setOnlineInvoice(null);
+    setOnlineMessage('');
   };
 
-  const handleCustomerChange = (event) => {
+  const handleOnlineCustomer = (event) => {
     const { name, value } = event.target;
-    setCustomerData((prev) => ({ ...prev, [name]: value }));
-    setOrder(null);
-    setFeedback('');
+    setOnlineCustomer((prev) => ({ ...prev, [name]: value }));
+    setOnlineOrder(null);
+    setOnlineInvoice(null);
+    setOnlineMessage('');
   };
 
-  const handleCashierChange = (event) => {
-    const { name, value } = event.target;
-    setCashierCredentials((prev) => ({ ...prev, [name]: value }));
-    setFeedback('');
-  };
-
-  const handleGenerateQR = (event) => {
+  const handleGenerateOnlineQR = (event) => {
     event.preventDefault();
 
-    const hasCustomerData =
-      customerData.fullName.trim() &&
-      customerData.idNumber.trim() &&
-      customerData.phone.trim() &&
-      customerData.email.trim();
-    const hasValidEmail = customerData.email.includes('@');
+    const hasData =
+      onlineCustomer.fullName.trim() &&
+      onlineCustomer.idNumber.trim() &&
+      onlineCustomer.phone.trim() &&
+      onlineCustomer.email.trim();
 
-    if (!hasCustomerData || !hasValidEmail || totalTickets === 0) {
-      setFeedback(
+    if (!hasData || !onlineCustomer.email.includes('@') || onlineTotalTickets === 0) {
+      setOnlineMessage(
         'Completa nombre, CI, celular, correo válido y selecciona al menos una entrada.'
       );
       return;
     }
 
-    const orderCode = `COLCA-${Date.now().toString().slice(-6)}`;
-    const orderSummary = TICKET_TYPES.filter((ticketType) => quantities[ticketType.key] > 0)
-      .map((ticketType) => `${ticketType.name}: ${quantities[ticketType.key]}`)
-      .join(' | ');
-
-    const qrPayload = [
+    const orderCode = generateCode('COLCA');
+    const summary = getTicketSummary(onlineQuantities);
+    const payload = [
       'Parque Ecoturístico Colcapujllay',
       `Pedido: ${orderCode}`,
-      `Cliente: ${customerData.fullName}`,
-      `CI: ${customerData.idNumber}`,
-      `Correo: ${customerData.email}`,
-      `Detalle: ${orderSummary}`,
-      `Total Bs: ${totalAmount}`,
+      `Cliente: ${onlineCustomer.fullName}`,
+      `CI: ${onlineCustomer.idNumber}`,
+      `Correo: ${onlineCustomer.email}`,
+      `Detalle: ${summary}`,
+      `Total Bs: ${onlineTotalAmount}`,
     ].join(' ; ');
 
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrPayload)}`;
-
-    setOrder({
+    setOnlineOrder({
       code: orderCode,
-      summary: orderSummary,
-      totalAmount,
-      qrUrl,
+      summary,
+      totalAmount: onlineTotalAmount,
+      qrUrl: buildQrUrl(payload),
       paid: false,
     });
-    setFeedback('QR generado. Presiona "Pagar ahora" para simular el pago.');
+    setOnlineInvoice(null);
+    setOnlineMessage('QR generado correctamente.');
   };
 
-  const handleSimulatedPayment = () => {
-    if (!order) {
+  const handleOnlinePayment = () => {
+    if (!onlineOrder) {
       return;
     }
 
-    setOrder((prev) => ({ ...prev, paid: true }));
-    setFeedback(
-      `Pago confirmado del QR. Se envió la confirmación al correo ${customerData.email} (demo).`
-    );
+    const invoiceNumber = generateCode('FAC');
+    const issueDate = new Date().toLocaleString('es-BO');
+
+    setOnlineOrder((prev) => ({ ...prev, paid: true }));
+    setOnlineInvoice({
+      number: invoiceNumber,
+      date: issueDate,
+      method: 'QR',
+      totalAmount: onlineOrder.totalAmount,
+      summary: onlineOrder.summary,
+      customerName: onlineCustomer.fullName,
+    });
+    setOnlineMessage(`Pago confirmado. Factura enviada al correo ${onlineCustomer.email}.`);
+  };
+
+  const handleCashierCredentials = (event) => {
+    const { name, value } = event.target;
+    setCashierCredentials((prev) => ({ ...prev, [name]: value }));
+    setCashierMessage('');
   };
 
   const handleCashierLogin = (event) => {
     event.preventDefault();
-    if (!cashierCredentials.user.trim() || !cashierCredentials.password.trim()) {
-      setFeedback('Ingresa usuario y contraseña de cajero.');
+    const isValid =
+      cashierCredentials.user === LOGIN_USER && cashierCredentials.password === LOGIN_PASSWORD;
+
+    if (!isValid) {
+      setCashierMessage('Usuario o contraseña incorrectos.');
       return;
     }
-    setFeedback('Inicio de sesión de cajero correcto (demo).');
+
+    setCashierLoggedIn(true);
+    setCashierMessage('Inicio de sesión correcto.');
+  };
+
+  const handleCashierCustomer = (event) => {
+    const { name, value } = event.target;
+    setCashierCustomer((prev) => ({ ...prev, [name]: value }));
+    setCashierMessage('');
+    setCashierInvoice(null);
+  };
+
+  const handleCashierQuantity = (ticketKey, value) => {
+    const nextValue = Math.max(0, Number(value) || 0);
+    setCashierQuantities((prev) => ({ ...prev, [ticketKey]: nextValue }));
+    setCashierMessage('');
+    setCashierInvoice(null);
+  };
+
+  const handleGenerateCashierInvoice = (event) => {
+    event.preventDefault();
+    const hasTickets = Object.values(cashierQuantities).some((value) => value > 0);
+    const hasCustomer = cashierCustomer.fullName.trim() && cashierCustomer.idNumber.trim();
+
+    if (!hasCustomer || !hasTickets) {
+      setCashierMessage('Completa datos del cliente y selecciona al menos una entrada.');
+      return;
+    }
+
+    const summary = getTicketSummary(cashierQuantities);
+    const invoiceNumber = generateCode('FAC');
+    const issueDate = new Date().toLocaleString('es-BO');
+    const saleCode = generateCode('VENTA');
+
+    if (cashierPaymentMethod === 'qr') {
+      const payload = [
+        'Parque Ecoturístico Colcapujllay',
+        `Venta: ${saleCode}`,
+        `Cliente: ${cashierCustomer.fullName}`,
+        `CI: ${cashierCustomer.idNumber}`,
+        `Detalle: ${summary}`,
+        `Total Bs: ${cashierTotalAmount}`,
+      ].join(' ; ');
+      setCashierQr(buildQrUrl(payload));
+    } else {
+      setCashierQr('');
+    }
+
+    setCashierInvoice({
+      number: invoiceNumber,
+      date: issueDate,
+      method: cashierPaymentMethod === 'qr' ? 'QR' : 'Efectivo',
+      totalAmount: cashierTotalAmount,
+      summary,
+      customerName: cashierCustomer.fullName,
+    });
+
+    if (cashierCustomer.email.trim() && cashierCustomer.email.includes('@')) {
+      setCashierMessage(`Factura generada y enviada al correo ${cashierCustomer.email}.`);
+      return;
+    }
+
+    setCashierMessage('Factura generada correctamente.');
   };
 
   return (
@@ -211,15 +284,7 @@ function App() {
               <div className="ticket-shop-content">
                 <header className="ticket-shop-header">
                   <h2>Compra de entradas en línea</h2>
-                  <p>Selecciona tipo de entrada, cantidad, genera tu QR y paga en esta misma pantalla.</p>
-                  <a
-                    className="location-link"
-                    href="https://share.google/Fa7Duq6YtinW08mcU"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Dirección / ubicación
-                  </a>
+                  <p>Selecciona tipo de entrada, cantidad, genera tu QR y completa el pago.</p>
                 </header>
 
                 <div className="ticket-grid">
@@ -229,29 +294,27 @@ function App() {
                       <div className="ticket-type-body">
                         <h3>{ticketType.name}</h3>
                         <p className="ticket-price">{ticketType.price} Bs</p>
-                        <label htmlFor={`qty-${ticketType.key}`}>Cantidad</label>
+                        <label htmlFor={`online-${ticketType.key}`}>Cantidad</label>
                         <div className="qty-controls">
                           <button
                             type="button"
                             onClick={() =>
-                              handleQuantityChange(ticketType.key, quantities[ticketType.key] - 1)
+                              handleOnlineQuantity(ticketType.key, onlineQuantities[ticketType.key] - 1)
                             }
                           >
                             -
                           </button>
                           <input
-                            id={`qty-${ticketType.key}`}
+                            id={`online-${ticketType.key}`}
                             type="number"
                             min="0"
-                            value={quantities[ticketType.key]}
-                            onChange={(event) =>
-                              handleQuantityChange(ticketType.key, event.target.value)
-                            }
+                            value={onlineQuantities[ticketType.key]}
+                            onChange={(event) => handleOnlineQuantity(ticketType.key, event.target.value)}
                           />
                           <button
                             type="button"
                             onClick={() =>
-                              handleQuantityChange(ticketType.key, quantities[ticketType.key] + 1)
+                              handleOnlineQuantity(ticketType.key, onlineQuantities[ticketType.key] + 1)
                             }
                           >
                             +
@@ -262,47 +325,47 @@ function App() {
                   ))}
                 </div>
 
-                <form className="checkout-card" onSubmit={handleGenerateQR}>
+                <form className="checkout-card" onSubmit={handleGenerateOnlineQR}>
                   <h3>Datos para la compra</h3>
                   <div className="checkout-fields">
                     <input
                       type="text"
                       name="fullName"
                       placeholder="Nombre completo"
-                      value={customerData.fullName}
-                      onChange={handleCustomerChange}
+                      value={onlineCustomer.fullName}
+                      onChange={handleOnlineCustomer}
                     />
                     <input
                       type="text"
                       name="idNumber"
                       placeholder="CI"
-                      value={customerData.idNumber}
-                      onChange={handleCustomerChange}
+                      value={onlineCustomer.idNumber}
+                      onChange={handleOnlineCustomer}
                     />
                     <input
                       type="tel"
                       name="phone"
                       placeholder="Celular"
-                      value={customerData.phone}
-                      onChange={handleCustomerChange}
+                      value={onlineCustomer.phone}
+                      onChange={handleOnlineCustomer}
                     />
                     <input
                       type="email"
                       name="email"
                       placeholder="Correo electrónico"
-                      value={customerData.email}
-                      onChange={handleCustomerChange}
+                      value={onlineCustomer.email}
+                      onChange={handleOnlineCustomer}
                     />
                   </div>
 
                   <div className="checkout-summary">
                     <p>
                       <span>Total entradas</span>
-                      <strong>{totalTickets}</strong>
+                      <strong>{onlineTotalTickets}</strong>
                     </p>
                     <p>
                       <span>Total a pagar</span>
-                      <strong>{totalAmount} Bs</strong>
+                      <strong>{onlineTotalAmount} Bs</strong>
                     </p>
                     <p className="checkout-note">Niños menores de 6 años ingresan gratis.</p>
                   </div>
@@ -315,33 +378,57 @@ function App() {
                       VOLVER AL INICIO
                     </button>
                   </div>
-                  {feedback ? <p className="feedback-message">{feedback}</p> : null}
+                  {onlineMessage ? <p className="feedback-message">{onlineMessage}</p> : null}
                 </form>
 
-                {order ? (
+                {onlineOrder ? (
                   <aside className="qr-result" id="pago-qr">
                     <h3>Pedido generado</h3>
                     <p>
-                      <strong>Código:</strong> {order.code}
+                      <strong>Código:</strong> {onlineOrder.code}
                     </p>
                     <p>
-                      <strong>Detalle:</strong> {order.summary}
+                      <strong>Detalle:</strong> {onlineOrder.summary}
                     </p>
                     <p>
-                      <strong>Total:</strong> {order.totalAmount} Bs
+                      <strong>Total:</strong> {onlineOrder.totalAmount} Bs
                     </p>
-                    <img src={order.qrUrl} alt="QR de pago de entradas" className="qr-image" />
+                    <img src={onlineOrder.qrUrl} alt="QR de pago de entradas" className="qr-image" />
                     <div className="pay-box">
                       <button
                         type="button"
                         className="pay-button"
-                        onClick={handleSimulatedPayment}
-                        disabled={order.paid}
+                        onClick={handleOnlinePayment}
+                        disabled={onlineOrder.paid}
                       >
-                        {order.paid ? 'PAGADO' : 'PAGAR AHORA (DEMO)'}
+                        {onlineOrder.paid ? 'PAGADO' : 'PAGAR AHORA'}
                       </button>
                     </div>
                   </aside>
+                ) : null}
+
+                {onlineInvoice ? (
+                  <section className="invoice-card">
+                    <h3>Factura</h3>
+                    <p>
+                      <strong>Nro:</strong> {onlineInvoice.number}
+                    </p>
+                    <p>
+                      <strong>Fecha:</strong> {onlineInvoice.date}
+                    </p>
+                    <p>
+                      <strong>Cliente:</strong> {onlineInvoice.customerName}
+                    </p>
+                    <p>
+                      <strong>Método de pago:</strong> {onlineInvoice.method}
+                    </p>
+                    <p>
+                      <strong>Detalle:</strong> {onlineInvoice.summary}
+                    </p>
+                    <p>
+                      <strong>Total:</strong> {onlineInvoice.totalAmount} Bs
+                    </p>
+                  </section>
                 ) : null}
               </div>
             </div>
@@ -350,47 +437,245 @@ function App() {
 
         {currentScreen === 'cashier' ? (
           <section className="screen-section">
-            <div className="cashier-screen">
-              <h2>Ingreso de cajeros - compra física</h2>
-              <p>Acceso para personal autorizado de taquilla del parque.</p>
-              <form className="cashier-form" onSubmit={handleCashierLogin}>
-                <input
-                  type="text"
-                  name="user"
-                  placeholder="Usuario"
-                  value={cashierCredentials.user}
-                  onChange={handleCashierChange}
-                />
-                <input
-                  type="password"
-                  name="password"
-                  placeholder="Contraseña"
-                  value={cashierCredentials.password}
-                  onChange={handleCashierChange}
-                />
-                <div className="checkout-actions">
-                  <button type="submit" className="subscribe-button">
-                    INICIAR SESIÓN
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => goToScreen('home')}
-                  >
-                    VOLVER AL INICIO
-                  </button>
-                </div>
-              </form>
-              {feedback ? <p className="feedback-message">{feedback}</p> : null}
+            <div className="ticket-shop">
+              <div className="ticket-shop-overlay" />
+              <div className="ticket-shop-content">
+                {!cashierLoggedIn ? (
+                  <div className="cashier-screen">
+                    <div className="cashier-header">
+                      <p className="cashier-badge">Acceso autorizado</p>
+                      <h2>Iniciar sesión</h2>
+                      <p className="cashier-subtitle">Ingresa tus credenciales para continuar.</p>
+                    </div>
+                    <form className="cashier-form" onSubmit={handleCashierLogin}>
+                      <input
+                        type="text"
+                        name="user"
+                        placeholder="Usuario"
+                        value={cashierCredentials.user}
+                        onChange={handleCashierCredentials}
+                      />
+                      <input
+                        type="password"
+                        name="password"
+                        placeholder="Contraseña"
+                        value={cashierCredentials.password}
+                        onChange={handleCashierCredentials}
+                      />
+                      <div className="checkout-actions">
+                        <button type="submit" className="subscribe-button">
+                          INICIAR SESIÓN
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => goToScreen('home')}
+                        >
+                          VOLVER AL INICIO
+                        </button>
+                      </div>
+                    </form>
+                    {cashierMessage ? <p className="feedback-message">{cashierMessage}</p> : null}
+                  </div>
+                ) : (
+                  <>
+                    <header className="ticket-shop-header">
+                      <h2>Venta en caja</h2>
+                      <p>Selecciona entradas, método de pago y genera la factura.</p>
+                    </header>
+
+                    <div className="ticket-grid">
+                      {TICKET_TYPES.map((ticketType) => (
+                        <article className="ticket-type-card" key={ticketType.key}>
+                          <img src={ticketType.image} alt={ticketType.name} className="ticket-type-image" />
+                          <div className="ticket-type-body">
+                            <h3>{ticketType.name}</h3>
+                            <p className="ticket-price">{ticketType.price} Bs</p>
+                            <label htmlFor={`cashier-${ticketType.key}`}>Cantidad</label>
+                            <div className="qty-controls">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleCashierQuantity(
+                                    ticketType.key,
+                                    cashierQuantities[ticketType.key] - 1
+                                  )
+                                }
+                              >
+                                -
+                              </button>
+                              <input
+                                id={`cashier-${ticketType.key}`}
+                                type="number"
+                                min="0"
+                                value={cashierQuantities[ticketType.key]}
+                                onChange={(event) =>
+                                  handleCashierQuantity(ticketType.key, event.target.value)
+                                }
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleCashierQuantity(
+                                    ticketType.key,
+                                    cashierQuantities[ticketType.key] + 1
+                                  )
+                                }
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+
+                    <form className="checkout-card" onSubmit={handleGenerateCashierInvoice}>
+                      <h3>Datos del cliente</h3>
+                      <div className="checkout-fields">
+                        <input
+                          type="text"
+                          name="fullName"
+                          placeholder="Nombre completo"
+                          value={cashierCustomer.fullName}
+                          onChange={handleCashierCustomer}
+                        />
+                        <input
+                          type="text"
+                          name="idNumber"
+                          placeholder="CI"
+                          value={cashierCustomer.idNumber}
+                          onChange={handleCashierCustomer}
+                        />
+                        <input
+                          type="tel"
+                          name="phone"
+                          placeholder="Celular"
+                          value={cashierCustomer.phone}
+                          onChange={handleCashierCustomer}
+                        />
+                        <input
+                          type="email"
+                          name="email"
+                          placeholder="Correo electrónico (opcional)"
+                          value={cashierCustomer.email}
+                          onChange={handleCashierCustomer}
+                        />
+                      </div>
+
+                      <div className="payment-method">
+                        <span>Método de pago</span>
+                        <label>
+                          <input
+                            type="radio"
+                            name="cashierPayment"
+                            checked={cashierPaymentMethod === 'qr'}
+                            onChange={() => setCashierPaymentMethod('qr')}
+                          />
+                          QR
+                        </label>
+                        <label>
+                          <input
+                            type="radio"
+                            name="cashierPayment"
+                            checked={cashierPaymentMethod === 'efectivo'}
+                            onChange={() => setCashierPaymentMethod('efectivo')}
+                          />
+                          Efectivo
+                        </label>
+                      </div>
+
+                      <div className="checkout-summary">
+                        <p>
+                          <span>Total a pagar</span>
+                          <strong>{cashierTotalAmount} Bs</strong>
+                        </p>
+                      </div>
+
+                      <div className="checkout-actions">
+                        <button type="submit" className="subscribe-button">
+                          GENERAR FACTURA
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => goToScreen('home')}
+                        >
+                          VOLVER AL INICIO
+                        </button>
+                      </div>
+                      {cashierMessage ? <p className="feedback-message">{cashierMessage}</p> : null}
+                    </form>
+
+                    {cashierQr ? (
+                      <aside className="qr-result">
+                        <h3>QR de pago</h3>
+                        <img src={cashierQr} alt="QR de pago en caja" className="qr-image" />
+                      </aside>
+                    ) : null}
+
+                    {cashierInvoice ? (
+                      <section className="invoice-card">
+                        <h3>Factura</h3>
+                        <p>
+                          <strong>Nro:</strong> {cashierInvoice.number}
+                        </p>
+                        <p>
+                          <strong>Fecha:</strong> {cashierInvoice.date}
+                        </p>
+                        <p>
+                          <strong>Cliente:</strong> {cashierInvoice.customerName}
+                        </p>
+                        <p>
+                          <strong>Método de pago:</strong> {cashierInvoice.method}
+                        </p>
+                        <p>
+                          <strong>Detalle:</strong> {cashierInvoice.summary}
+                        </p>
+                        <p>
+                          <strong>Total:</strong> {cashierInvoice.totalAmount} Bs
+                        </p>
+                      </section>
+                    ) : null}
+                  </>
+                )}
+              </div>
             </div>
           </section>
         ) : null}
+
+        <section className="location-section">
+          <div className="location-card">
+            <div className="location-media">
+              <img src={colca6} alt="Ubicación Parque Colcapujllay" />
+            </div>
+            <div className="location-info">
+              <p className="location-kicker">Ubicación oficial</p>
+              <h3>Parque Ecoturístico Colcapujllay</h3>
+              <p className="location-description">
+                Visítanos en Colcapirhua, Cochabamba. Contamos con acceso principal señalizado y
+                espacio para atención al visitante.
+              </p>
+              <div className="location-details">
+                <p>
+                  <strong>Municipio:</strong> Colcapirhua
+                </p>
+                <p>
+                  <strong>Departamento:</strong> Cochabamba
+                </p>
+              </div>
+              <a href="https://share.google/Fa7Duq6YtinW08mcU" target="_blank" rel="noreferrer">
+                Abrir dirección en Google Maps
+              </a>
+            </div>
+          </div>
+        </section>
       </main>
 
       <Footer
         onNavigateHome={() => goToScreen('home')}
         onNavigatePurchase={() => goToScreen('purchase')}
-        onNavigateCashier={() => goToScreen('cashier')}
+        onNavigateLogin={() => goToScreen('cashier')}
       />
     </div>
   );
