@@ -1,54 +1,67 @@
-import React from 'react';
 import '../styles/Footer.css';
+import colcaLogo from '../assets/images/colcalogo.png';
 
-function Footer() {
-  const brands = [
-    { name: 'COLCA+' },
-    { name: 'PUJLLAY' },
-    { name: 'DANZA' },
-    { name: 'MUSICA' },
-    { name: 'CULTURA' },
-    { name: 'TURISMO' },
-    { name: 'GASTRONOMIA' },
+function Footer({ onNavigateHome, onNavigatePurchase, onNavigateCashier }) {
+  const socialLinks = [
+    {
+      label: 'Facebook',
+      href: 'https://www.facebook.com/GobiernoMunicipalColcapirhua',
+    },
+    {
+      label: 'X',
+      href: 'https://x.com/GAMColcapirhua',
+    },
+    {
+      label: 'YouTube',
+      href: 'https://www.youtube.com/@gamcolcapirhua',
+    },
   ];
 
   return (
     <footer className="footer">
       <div className="footer-content">
-        <div className="footer-strip">
-          <div className="footer-brands">
-            {brands.map((brand, index) => (
-              <React.Fragment key={brand.name}>
-                <span className={`footer-brand-item ${brand.className || ''}`}>{brand.name}</span>
-                {index < brands.length - 1 && <span className="footer-separator">+</span>}
-              </React.Fragment>
-            ))}
+        <div className="footer-top">
+          <div className="footer-branding">
+            <img src={colcaLogo} alt="Colcapujllay" className="footer-logo" />
+            <p className="footer-address">Colcapirhua - Cochabamba, Bolivia</p>
+            <a
+              className="footer-location"
+              href="https://share.google/Fa7Duq6YtinW08mcU"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Ver ubicación en Google Maps
+            </a>
+          </div>
+
+          <div className="footer-right">
+            <div className="footer-social">
+              {socialLinks.map((item) => (
+                <a key={item.label} href={item.href} target="_blank" rel="noreferrer">
+                  {item.label}
+                </a>
+              ))}
+            </div>
+            <button type="button" className="cashier-login-button" onClick={onNavigateCashier}>
+              Iniciar sesión cajeros
+            </button>
           </div>
         </div>
 
         <div className="footer-links">
-          <a href="#">Inicio</a>
-          <a href="#">Entradas</a>
-          <a href="#">Programación</a>
-          <a href="#">Contacto</a>
-          <a href="#">Ayuda</a>
+          <button type="button" onClick={onNavigateHome}>
+            Inicio
+          </button>
+          <button type="button" onClick={onNavigatePurchase}>
+            Comprar entradas
+          </button>
         </div>
 
-        <div className="footer-progress">
-          <span className="footer-control" aria-hidden="true">⌄</span>
-          <div className="footer-timeline">
-            <div className="timeline-segments" aria-hidden="true">
-              <span className="timeline-segment active" />
-              <span className="timeline-segment" />
-              <span className="timeline-segment" />
-              <span className="timeline-segment" />
-            </div>
-            <p className="timeline-label">Festival del Colca Pujllay</p>
-          </div>
-          <span className="footer-control" aria-hidden="true">II</span>
-        </div>
-
-        <p className="footer-copy">Colca Pujllay © {new Date().getFullYear()} - Todos los derechos reservados.</p>
+        <div className="footer-divider" />
+        <p className="footer-copy">
+          Gobierno Autónomo Municipal de Colcapirhua © {new Date().getFullYear()} - Todos los
+          derechos reservados.
+        </p>
       </div>
     </footer>
   );
