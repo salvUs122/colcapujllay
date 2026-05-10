@@ -59,6 +59,7 @@ function App() {
   const [cashierQuantities, setCashierQuantities] = useState({ general: 0, ninos: 0, mayores: 0 });
   const [cashierPaymentMethod, setCashierPaymentMethod] = useState('qr');
   const [cashierQr, setCashierQr] = useState('');
+  const [cashierPendingPayment, setCashierPendingPayment] = useState(null);
   const [cashierInvoice, setCashierInvoice] = useState(null);
   const [cashierMessage, setCashierMessage] = useState('');
 
@@ -181,10 +182,24 @@ function App() {
     setCashierMessage('Inicio de sesión correcto.');
   };
 
+  const handleCashierLogout = () => {
+    setCashierLoggedIn(false);
+    setCashierCredentials({ user: '', password: '' });
+    setCashierCustomer({ fullName: '', idNumber: '', phone: '', email: '' });
+    setCashierQuantities({ general: 0, ninos: 0, mayores: 0 });
+    setCashierPaymentMethod('qr');
+    setCashierQr('');
+    setCashierPendingPayment(null);
+    setCashierInvoice(null);
+    setCashierMessage('');
+  };
+
   const handleCashierCustomer = (event) => {
     const { name, value } = event.target;
     setCashierCustomer((prev) => ({ ...prev, [name]: value }));
     setCashierMessage('');
+    setCashierPendingPayment(null);
+    setCashierQr('');
     setCashierInvoice(null);
   };
 
@@ -192,10 +207,12 @@ function App() {
     const nextValue = Math.max(0, Number(value) || 0);
     setCashierQuantities((prev) => ({ ...prev, [ticketKey]: nextValue }));
     setCashierMessage('');
+    setCashierPendingPayment(null);
+    setCashierQr('');
     setCashierInvoice(null);
   };
 
-  const handleGenerateCashierInvoice = (event) => {
+  const handlePrepareCashierPayment = (event) => {
     event.preventDefault();
     const hasTickets = Object.values(cashierQuantities).some((value) => value > 0);
     const hasCustomer = cashierCustomer.fullName.trim() && cashierCustomer.idNumber.trim();
@@ -206,39 +223,52 @@ function App() {
     }
 
     const summary = getTicketSummary(cashierQuantities);
+    const saleCode = generateCode('VENTA');
+    const qrPayload = [
+      'Parque Ecoturístico Colcapujllay',
+      `Venta: ${saleCode}`,
+      `Cliente: ${cashierCustomer.fullName}`,
+      `CI: ${cashierCustomer.idNumber}`,
+      `Detalle: ${summary}`,
+      `Total Bs: ${cashierTotalAmount}`,
+    ].join(' ; ');
+
+    setCashierPendingPayment({
+      saleCode,
+      summary,
+      totalAmount: cashierTotalAmount,
+      method: cashierPaymentMethod === 'qr' ? 'QR' : 'Efectivo',
+      qrUrl: buildQrUrl(qrPayload),
+    });
+    setCashierQr(cashierPaymentMethod === 'qr' ? buildQrUrl(qrPayload) : '');
+    setCashierInvoice(null);
+    setCashierMessage('Cobro generado. Completa el pago para emitir la factura.');
+  };
+
+  const handleCashierPayment = () => {
+    if (!cashierPendingPayment) {
+      return;
+    }
+
     const invoiceNumber = generateCode('FAC');
     const issueDate = new Date().toLocaleString('es-BO');
-    const saleCode = generateCode('VENTA');
-
-    if (cashierPaymentMethod === 'qr') {
-      const payload = [
-        'Parque Ecoturístico Colcapujllay',
-        `Venta: ${saleCode}`,
-        `Cliente: ${cashierCustomer.fullName}`,
-        `CI: ${cashierCustomer.idNumber}`,
-        `Detalle: ${summary}`,
-        `Total Bs: ${cashierTotalAmount}`,
-      ].join(' ; ');
-      setCashierQr(buildQrUrl(payload));
-    } else {
-      setCashierQr('');
-    }
 
     setCashierInvoice({
       number: invoiceNumber,
       date: issueDate,
-      method: cashierPaymentMethod === 'qr' ? 'QR' : 'Efectivo',
-      totalAmount: cashierTotalAmount,
-      summary,
+      method: cashierPendingPayment.method,
+      totalAmount: cashierPendingPayment.totalAmount,
+      summary: cashierPendingPayment.summary,
       customerName: cashierCustomer.fullName,
     });
-
+    setCashierPendingPayment(null);
+    setCashierQr('');
     if (cashierCustomer.email.trim() && cashierCustomer.email.includes('@')) {
-      setCashierMessage(`Factura generada y enviada al correo ${cashierCustomer.email}.`);
+      setCashierMessage(`Pago confirmado. Factura enviada al correo ${cashierCustomer.email}.`);
       return;
     }
 
-    setCashierMessage('Factura generada correctamente.');
+    setCashierMessage('Pago confirmado. Factura generada correctamente.');
   };
 
   return (
@@ -480,7 +510,12 @@ function App() {
                 ) : (
                   <>
                     <header className="ticket-shop-header">
-                      <h2>Venta en caja</h2>
+                      <div className="cashier-toolbar">
+                        <h2>Venta en caja</h2>
+                        <button type="button" className="logout-button" onClick={handleCashierLogout}>
+                          CERRAR SESIÓN
+                        </button>
+                      </div>
                       <p>Selecciona entradas, método de pago y genera la factura.</p>
                     </header>
 
@@ -530,7 +565,7 @@ function App() {
                       ))}
                     </div>
 
-                    <form className="checkout-card" onSubmit={handleGenerateCashierInvoice}>
+                    <form className="checkout-card" onSubmit={handlePrepareCashierPayment}>
                       <h3>Datos del cliente</h3>
                       <div className="checkout-fields">
                         <input
@@ -570,7 +605,13 @@ function App() {
                             type="radio"
                             name="cashierPayment"
                             checked={cashierPaymentMethod === 'qr'}
-                            onChange={() => setCashierPaymentMethod('qr')}
+                            onChange={() => {
+                              setCashierPaymentMethod('qr');
+                              setCashierPendingPayment(null);
+                              setCashierQr('');
+                              setCashierInvoice(null);
+                              setCashierMessage('');
+                            }}
                           />
                           QR
                         </label>
@@ -579,7 +620,13 @@ function App() {
                             type="radio"
                             name="cashierPayment"
                             checked={cashierPaymentMethod === 'efectivo'}
-                            onChange={() => setCashierPaymentMethod('efectivo')}
+                            onChange={() => {
+                              setCashierPaymentMethod('efectivo');
+                              setCashierPendingPayment(null);
+                              setCashierQr('');
+                              setCashierInvoice(null);
+                              setCashierMessage('');
+                            }}
                           />
                           Efectivo
                         </label>
@@ -594,7 +641,7 @@ function App() {
 
                       <div className="checkout-actions">
                         <button type="submit" className="subscribe-button">
-                          GENERAR FACTURA
+                          GENERAR COBRO
                         </button>
                         <button
                           type="button"
@@ -606,6 +653,23 @@ function App() {
                       </div>
                       {cashierMessage ? <p className="feedback-message">{cashierMessage}</p> : null}
                     </form>
+
+                    {cashierPendingPayment ? (
+                      <aside className="payment-action-card">
+                        <h3>Confirmar pago</h3>
+                        <p>
+                          <strong>Método:</strong> {cashierPendingPayment.method}
+                        </p>
+                        <p>
+                          <strong>Total:</strong> {cashierPendingPayment.totalAmount} Bs
+                        </p>
+                        <button type="button" className="pay-button" onClick={handleCashierPayment}>
+                          {cashierPendingPayment.method === 'QR'
+                            ? 'PAGAR CON QR'
+                            : 'PAGAR EN EFECTIVO'}
+                        </button>
+                      </aside>
+                    ) : null}
 
                     {cashierQr ? (
                       <aside className="qr-result">
@@ -644,32 +708,34 @@ function App() {
           </section>
         ) : null}
 
-        <section className="location-section">
-          <div className="location-card">
-            <div className="location-media">
-              <img src={colca6} alt="Ubicación Parque Colcapujllay" />
-            </div>
-            <div className="location-info">
-              <p className="location-kicker">Ubicación oficial</p>
-              <h3>Parque Ecoturístico Colcapujllay</h3>
-              <p className="location-description">
-                Visítanos en Colcapirhua, Cochabamba. Contamos con acceso principal señalizado y
-                espacio para atención al visitante.
-              </p>
-              <div className="location-details">
-                <p>
-                  <strong>Municipio:</strong> Colcapirhua
-                </p>
-                <p>
-                  <strong>Departamento:</strong> Cochabamba
-                </p>
+        {currentScreen === 'home' ? (
+          <section className="location-section">
+            <div className="location-card">
+              <div className="location-media">
+                <img src={colca6} alt="Ubicación Parque Colcapujllay" />
               </div>
-              <a href="https://share.google/Fa7Duq6YtinW08mcU" target="_blank" rel="noreferrer">
-                Abrir dirección en Google Maps
-              </a>
+              <div className="location-info">
+                <p className="location-kicker">Ubicación oficial</p>
+                <h3>Parque Ecoturístico Colcapujllay</h3>
+                <p className="location-description">
+                  Visítanos en Colcapirhua, Cochabamba. Contamos con acceso principal señalizado y
+                  espacio para atención al visitante.
+                </p>
+                <div className="location-details">
+                  <p>
+                    <strong>Municipio:</strong> Colcapirhua
+                  </p>
+                  <p>
+                    <strong>Departamento:</strong> Cochabamba
+                  </p>
+                </div>
+                <a href="https://share.google/Fa7Duq6YtinW08mcU" target="_blank" rel="noreferrer">
+                  Abrir dirección en Google Maps
+                </a>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
       </main>
 
       <Footer

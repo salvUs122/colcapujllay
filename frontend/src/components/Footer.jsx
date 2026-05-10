@@ -35,8 +35,6 @@ function Footer({ onNavigateHome, onNavigatePurchase, onNavigateLogin }) {
           </button>
         </div>
 
-        <div className="footer-divider" />
-
         <div className="footer-bottom">
           <p className="footer-copy">
             Gobierno Autónomo Municipal de Colcapirhua © {new Date().getFullYear()} - Todos los

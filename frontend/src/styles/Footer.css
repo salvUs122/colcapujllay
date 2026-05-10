@@ -1,10 +1,21 @@
 .footer {
+  position: relative;
   background:
     radial-gradient(circle at 5% 0%, rgba(255, 199, 65, 0.2) 0%, transparent 25%),
     radial-gradient(circle at 90% 0%, rgba(31, 210, 234, 0.22) 0%, transparent 28%),
     linear-gradient(180deg, #041135 0%, #030a21 100%);
   padding: 1.4rem clamp(1rem, 3vw, 4rem) 1.1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 2px solid rgba(255, 255, 255, 0.22);
+}
+
+.footer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(255, 199, 65, 0.9), rgba(255, 255, 255, 0.5));
 }
 
 .footer-content {
@@ -79,13 +90,6 @@
 .footer-links button:hover {
   color: #ffc741;
   border-color: #ffc741;
-}
-
-.footer-divider {
-  height: 3px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(255, 199, 65, 0.9), rgba(255, 255, 255, 0.42));
-  margin-bottom: 0.65rem;
 }
 
 .footer-bottom {
