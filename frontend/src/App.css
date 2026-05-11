@@ -21,7 +21,7 @@
   inset: 0;
   z-index: 1;
   background-size: cover;
-  background-position: 58% 42%;
+  background-position: 58% 18%;
   animation: fadeHero 0.9s ease;
   transform: scale(1.02);
 }
@@ -564,7 +564,7 @@
   }
 
   .hero-fullscreen-image {
-    background-position: 62% 44%;
+    background-position: 62% 20%;
   }
 
   .hero-overlay {

@@ -11,28 +11,30 @@ function Footer({ onNavigateHome, onNavigatePurchase, onNavigateLogin }) {
   return (
     <footer className="footer">
       <div className="footer-content">
-        <div className="footer-top">
-          <div className="footer-branding">
-            <img src={colcaLogo} alt="Colcapujllay" className="footer-logo" />
-            <p className="footer-address">Colcapirhua - Cochabamba, Bolivia</p>
+        <div className="footer-main">
+          <div className="footer-top">
+            <div className="footer-branding">
+              <img src={colcaLogo} alt="Colcapujllay" className="footer-logo" />
+              <p className="footer-address">Colcapirhua - Cochabamba, Bolivia</p>
+            </div>
+
+            <div className="footer-social">
+              {socialLinks.map((item) => (
+                <a key={item.label} href={item.href} target="_blank" rel="noreferrer">
+                  {item.label}
+                </a>
+              ))}
+            </div>
           </div>
 
-          <div className="footer-social">
-            {socialLinks.map((item) => (
-              <a key={item.label} href={item.href} target="_blank" rel="noreferrer">
-                {item.label}
-              </a>
-            ))}
+          <div className="footer-links">
+            <button type="button" onClick={onNavigateHome}>
+              Inicio
+            </button>
+            <button type="button" onClick={onNavigatePurchase}>
+              Comprar entradas
+            </button>
           </div>
-        </div>
-
-        <div className="footer-links">
-          <button type="button" onClick={onNavigateHome}>
-            Inicio
-          </button>
-          <button type="button" onClick={onNavigatePurchase}>
-            Comprar entradas
-          </button>
         </div>
 
         <div className="footer-bottom">
