@@ -32,10 +32,73 @@ const generateCode = (prefix) => `${prefix}-${Date.now().toString().slice(-7)}`;
 const buildQrUrl = (payload) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(payload)}`;
 
+const CASHIER_TICKETS_STORAGE_KEY = 'colca-cashier-tickets';
+const CASHIER_INVOICE_IMAGE = '/imagenes/fotoFactura.png';
+
+const escapeHtml = (value) =>
+  String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+
+const getCashierTickets = () => {
+  const storageValue = window.localStorage.getItem(CASHIER_TICKETS_STORAGE_KEY);
+  return storageValue ? JSON.parse(storageValue) : {};
+};
+
+const saveCashierTickets = (ticketsByCode) => {
+  window.localStorage.setItem(CASHIER_TICKETS_STORAGE_KEY, JSON.stringify(ticketsByCode));
+};
+
+const registerCashierTicket = (ticketData) => {
+  const ticketsByCode = getCashierTickets();
+  ticketsByCode[ticketData.code] = ticketData;
+  saveCashierTickets(ticketsByCode);
+};
+
+const validateCashierTicket = (ticketCode) => {
+  const normalizedCode = ticketCode.trim().toUpperCase();
+  const ticketsByCode = getCashierTickets();
+  const ticket = ticketsByCode[normalizedCode];
+
+  if (!ticket) {
+    return {
+      status: 'INVALIDA',
+      ticketCode: normalizedCode,
+      message: 'La entrada no existe o ya no es válida.',
+    };
+  }
+
+  if (ticket.status === 'USADO') {
+    return {
+      status: 'USADO',
+      ticket,
+      message: 'Esta entrada ya fue utilizada anteriormente.',
+    };
+  }
+
+  const usedAt = new Date().toLocaleString('es-BO');
+  const usedTicket = { ...ticket, status: 'USADO', usedAt };
+  ticketsByCode[normalizedCode] = usedTicket;
+  saveCashierTickets(ticketsByCode);
+
+  return {
+    status: 'USADO_AHORA',
+    ticket: usedTicket,
+    message: 'Entrada válida. Fue marcada como USADO.',
+  };
+};
+
 function App() {
+  const ticketCodeFromUrl = new URLSearchParams(window.location.search).get('ticket');
+  const normalizedTicketCodeFromUrl = ticketCodeFromUrl ? ticketCodeFromUrl.trim().toUpperCase() : '';
   const heroImages = [colca1, colca2, colca3, colca4, colca5, colca6, colca7];
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [currentScreen, setCurrentScreen] = useState('home');
+  const [currentScreen, setCurrentScreen] = useState(
+    normalizedTicketCodeFromUrl ? 'ticketValidation' : 'home'
+  );
 
   const [onlineCustomer, setOnlineCustomer] = useState({
     fullName: '',
@@ -62,6 +125,8 @@ function App() {
   const [cashierPendingPayment, setCashierPendingPayment] = useState(null);
   const [cashierInvoice, setCashierInvoice] = useState(null);
   const [cashierMessage, setCashierMessage] = useState('');
+  const [pendingTicketCode, setPendingTicketCode] = useState(normalizedTicketCodeFromUrl);
+  const [ticketValidationResult, setTicketValidationResult] = useState(null);
 
   useEffect(() => {
     if (currentScreen !== 'home') {
@@ -83,6 +148,15 @@ function App() {
   const cashierTotalAmount = useMemo(() => getTotalAmount(cashierQuantities), [cashierQuantities]);
 
   const goToScreen = (screenName) => {
+    if (screenName !== 'ticketValidation' && window.location.search.includes('ticket=')) {
+      window.history.replaceState({}, '', `${window.location.origin}${window.location.pathname}`);
+      setTicketValidationResult(null);
+    }
+
+    if (screenName === 'home') {
+      setPendingTicketCode('');
+    }
+
     setCurrentScreen(screenName);
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   };
@@ -135,6 +209,7 @@ function App() {
       code: orderCode,
       summary,
       totalAmount: onlineTotalAmount,
+      totalTickets: onlineTotalTickets,
       qrUrl: buildQrUrl(payload),
       paid: false,
     });
@@ -149,6 +224,23 @@ function App() {
 
     const invoiceNumber = generateCode('FAC');
     const issueDate = new Date().toLocaleString('es-BO');
+    const entryCode = generateCode('ENT').toUpperCase();
+    const entryValidationUrl = `${window.location.origin}${window.location.pathname}?ticket=${encodeURIComponent(entryCode)}`;
+    const entryQrUrl = buildQrUrl(entryValidationUrl);
+
+    registerCashierTicket({
+      code: entryCode,
+      status: 'VIGENTE',
+      usedAt: null,
+      customerName: onlineCustomer.fullName,
+      customerId: onlineCustomer.idNumber,
+      summary: onlineOrder.summary,
+      totalAmount: onlineOrder.totalAmount,
+      totalTickets: onlineOrder.totalTickets,
+      saleCode: onlineOrder.code,
+      invoiceNumber,
+      issuedAt: issueDate,
+    });
 
     setOnlineOrder((prev) => ({ ...prev, paid: true }));
     setOnlineInvoice({
@@ -158,6 +250,10 @@ function App() {
       totalAmount: onlineOrder.totalAmount,
       summary: onlineOrder.summary,
       customerName: onlineCustomer.fullName,
+      totalTickets: onlineOrder.totalTickets,
+      entryCode,
+      entryQrUrl,
+      entryStatus: 'VIGENTE',
     });
     setOnlineMessage(`Pago confirmado. Factura enviada al correo ${onlineCustomer.email}.`);
   };
@@ -179,6 +275,13 @@ function App() {
     }
 
     setCashierLoggedIn(true);
+    if (pendingTicketCode) {
+      setTicketValidationResult(validateCashierTicket(pendingTicketCode));
+      setCurrentScreen('ticketValidation');
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      return;
+    }
+
     setCashierMessage('Inicio de sesión correcto.');
   };
 
@@ -224,6 +327,7 @@ function App() {
 
     const summary = getTicketSummary(cashierQuantities);
     const saleCode = generateCode('VENTA');
+    const totalTickets = Object.values(cashierQuantities).reduce((acc, value) => acc + value, 0);
     const qrPayload = [
       'Parque Ecoturístico Colcapujllay',
       `Venta: ${saleCode}`,
@@ -237,6 +341,7 @@ function App() {
       saleCode,
       summary,
       totalAmount: cashierTotalAmount,
+      totalTickets,
       method: cashierPaymentMethod === 'qr' ? 'QR' : 'Efectivo',
       qrUrl: buildQrUrl(qrPayload),
     });
@@ -252,6 +357,23 @@ function App() {
 
     const invoiceNumber = generateCode('FAC');
     const issueDate = new Date().toLocaleString('es-BO');
+    const entryCode = generateCode('ENT').toUpperCase();
+    const entryValidationUrl = `${window.location.origin}${window.location.pathname}?ticket=${encodeURIComponent(entryCode)}`;
+    const entryQrUrl = buildQrUrl(entryValidationUrl);
+
+    registerCashierTicket({
+      code: entryCode,
+      status: 'VIGENTE',
+      usedAt: null,
+      customerName: cashierCustomer.fullName,
+      customerId: cashierCustomer.idNumber,
+      summary: cashierPendingPayment.summary,
+      totalAmount: cashierPendingPayment.totalAmount,
+      totalTickets: cashierPendingPayment.totalTickets,
+      saleCode: cashierPendingPayment.saleCode,
+      invoiceNumber,
+      issuedAt: issueDate,
+    });
 
     setCashierInvoice({
       number: invoiceNumber,
@@ -260,6 +382,11 @@ function App() {
       totalAmount: cashierPendingPayment.totalAmount,
       summary: cashierPendingPayment.summary,
       customerName: cashierCustomer.fullName,
+      totalTickets: cashierPendingPayment.totalTickets,
+      entryCode,
+      entryQrUrl,
+      entryValidationUrl,
+      entryStatus: 'VIGENTE',
     });
     setCashierPendingPayment(null);
     setCashierQr('');
@@ -269,6 +396,252 @@ function App() {
     }
 
     setCashierMessage('Pago confirmado. Factura generada correctamente.');
+  };
+
+  const handleDownloadCashierInvoice = () => {
+    if (!cashierInvoice) {
+      return;
+    }
+
+    const invoiceImageUrl = new URL(CASHIER_INVOICE_IMAGE, window.location.origin).toString();
+    const html = `<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Factura ${escapeHtml(cashierInvoice.number)}</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0;
+        padding: 1.2rem;
+        font-family: Arial, sans-serif;
+        background: #f3f5fb;
+        color: #1b2330;
+      }
+      .invoice {
+        width: min(100%, 540px);
+        max-width: 540px;
+        margin: 0 auto;
+        border: 1px solid #d8deea;
+        border-radius: 12px;
+        background: #fff;
+        padding: 1rem;
+      }
+      .banner {
+        width: 100%;
+        max-height: 220px;
+        height: auto;
+        display: block;
+        margin: 0 auto;
+        object-fit: contain;
+        border-radius: 10px;
+        border: 1px solid #e3e8f3;
+        background: #fff;
+      }
+      @media (max-width: 560px) {
+        body {
+          padding: 0.7rem;
+        }
+      }
+      h1 {
+        margin: 0.8rem 0 0.6rem;
+        color: #18406c;
+        font-size: 1.5rem;
+      }
+      .row {
+        margin: 0.35rem 0;
+        line-height: 1.4;
+      }
+      .status {
+        display: inline-block;
+        margin: 0.3rem 0 0.5rem;
+        border-radius: 999px;
+        padding: 0.22rem 0.66rem;
+        border: 1px solid #5ab88d;
+        color: #0d6742;
+        background: #dcf5e9;
+        font-weight: 700;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+      }
+      .ticket-box {
+        margin-top: 0.9rem;
+        border: 1px solid #dbe2ef;
+        border-radius: 10px;
+        padding: 0.8rem;
+      }
+      .ticket-box h2 {
+        margin: 0 0 0.55rem;
+        font-size: 1.05rem;
+        color: #1a4f78;
+      }
+      .qr {
+        width: 220px;
+        max-width: 100%;
+        border: 4px solid #fff;
+        border-radius: 8px;
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="invoice">
+      <img src="${invoiceImageUrl}" alt="Imagen superior de la factura" class="banner" />
+      <h1>Factura</h1>
+      <span class="status">Entrada: ${escapeHtml(cashierInvoice.entryStatus)}</span>
+      <p class="row"><strong>Nro:</strong> ${escapeHtml(cashierInvoice.number)}</p>
+      <p class="row"><strong>Fecha:</strong> ${escapeHtml(cashierInvoice.date)}</p>
+      <p class="row"><strong>Cliente:</strong> ${escapeHtml(cashierInvoice.customerName)}</p>
+      <p class="row"><strong>Método de pago:</strong> ${escapeHtml(cashierInvoice.method)}</p>
+      <p class="row"><strong>Detalle:</strong> ${escapeHtml(cashierInvoice.summary)}</p>
+      <p class="row"><strong>Total:</strong> ${escapeHtml(cashierInvoice.totalAmount)} Bs</p>
+      <p class="row"><strong>Cantidad de entradas:</strong> ${escapeHtml(cashierInvoice.totalTickets)}</p>
+      <p class="row"><strong>Código de entrada:</strong> ${escapeHtml(cashierInvoice.entryCode)}</p>
+      <div class="ticket-box">
+        <h2>QR de entrada (un solo uso)</h2>
+        <img src="${escapeHtml(cashierInvoice.entryQrUrl)}" alt="QR de entrada" class="qr" />
+      </div>
+    </section>
+  </body>
+</html>`;
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    const fileName = `Factura-${cashierInvoice.number}.html`;
+    const downloadLink = document.createElement('a');
+    downloadLink.href = blobUrl;
+    downloadLink.download = fileName;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    URL.revokeObjectURL(blobUrl);
+    setCashierMessage(`Factura descargada: ${fileName}`);
+  };
+
+  const handleDownloadOnlineInvoice = () => {
+    if (!onlineInvoice) {
+      return;
+    }
+
+    const invoiceImageUrl = new URL(CASHIER_INVOICE_IMAGE, window.location.origin).toString();
+    const html = `<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Factura ${escapeHtml(onlineInvoice.number)}</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0;
+        padding: 1.2rem;
+        font-family: Arial, sans-serif;
+        background: #f3f5fb;
+        color: #1b2330;
+      }
+      .invoice {
+        width: min(100%, 540px);
+        max-width: 540px;
+        margin: 0 auto;
+        border: 1px solid #d8deea;
+        border-radius: 12px;
+        background: #fff;
+        padding: 1rem;
+      }
+      .banner {
+        width: 100%;
+        max-height: 220px;
+        height: auto;
+        display: block;
+        margin: 0 auto;
+        object-fit: contain;
+        border-radius: 10px;
+        border: 1px solid #e3e8f3;
+        background: #fff;
+      }
+      @media (max-width: 560px) {
+        body {
+          padding: 0.7rem;
+        }
+      }
+      h1 {
+        margin: 0.8rem 0 0.6rem;
+        color: #18406c;
+        font-size: 1.5rem;
+      }
+      .row {
+        margin: 0.35rem 0;
+        line-height: 1.4;
+      }
+      .status {
+        display: inline-block;
+        margin: 0.3rem 0 0.5rem;
+        border-radius: 999px;
+        padding: 0.22rem 0.66rem;
+        border: 1px solid #5ab88d;
+        color: #0d6742;
+        background: #dcf5e9;
+        font-weight: 700;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+      }
+      .ticket-box {
+        margin-top: 0.9rem;
+        border: 1px solid #dbe2ef;
+        border-radius: 10px;
+        padding: 0.8rem;
+      }
+      .ticket-box h2 {
+        margin: 0 0 0.55rem;
+        font-size: 1.05rem;
+        color: #1a4f78;
+      }
+      .ticket-note {
+        margin: 0.45rem 0 0;
+        color: #4c6075;
+        font-size: 0.88rem;
+      }
+      .qr {
+        width: 220px;
+        max-width: 100%;
+        border: 4px solid #fff;
+        border-radius: 8px;
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="invoice">
+      <img src="${invoiceImageUrl}" alt="Imagen superior de la factura" class="banner" />
+      <h1>Factura</h1>
+      <span class="status">Entrada: ${escapeHtml(onlineInvoice.entryStatus)}</span>
+      <p class="row"><strong>Nro:</strong> ${escapeHtml(onlineInvoice.number)}</p>
+      <p class="row"><strong>Fecha:</strong> ${escapeHtml(onlineInvoice.date)}</p>
+      <p class="row"><strong>Cliente:</strong> ${escapeHtml(onlineInvoice.customerName)}</p>
+      <p class="row"><strong>Método de pago:</strong> ${escapeHtml(onlineInvoice.method)}</p>
+      <p class="row"><strong>Detalle:</strong> ${escapeHtml(onlineInvoice.summary)}</p>
+      <p class="row"><strong>Total:</strong> ${escapeHtml(onlineInvoice.totalAmount)} Bs</p>
+      <p class="row"><strong>Cantidad de entradas:</strong> ${escapeHtml(onlineInvoice.totalTickets)}</p>
+      <p class="row"><strong>Código de entrada:</strong> ${escapeHtml(onlineInvoice.entryCode)}</p>
+      <div class="ticket-box">
+        <h2>QR de entrada (un solo uso)</h2>
+        <img src="${escapeHtml(onlineInvoice.entryQrUrl)}" alt="QR de entrada" class="qr" />
+        <p class="ticket-note">La validación la realiza solo personal autorizado en caja.</p>
+      </div>
+    </section>
+  </body>
+</html>`;
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    const fileName = `Factura-${onlineInvoice.number}.html`;
+    const downloadLink = document.createElement('a');
+    downloadLink.href = blobUrl;
+    downloadLink.download = fileName;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    URL.revokeObjectURL(blobUrl);
+    setOnlineMessage(`Factura descargada: ${fileName}`);
   };
 
   return (
@@ -438,8 +811,18 @@ function App() {
                 ) : null}
 
                 {onlineInvoice ? (
-                  <section className="invoice-card">
-                    <h3>Factura</h3>
+                  <section className="invoice-card cashier-invoice-card">
+                    <img
+                      src={CASHIER_INVOICE_IMAGE}
+                      alt="Imagen superior de la factura"
+                      className="cashier-invoice-banner"
+                    />
+                    <div className="cashier-invoice-header">
+                      <h3>Factura</h3>
+                      <span className="ticket-status-badge valid">
+                        Entrada: {onlineInvoice.entryStatus}
+                      </span>
+                    </div>
                     <p>
                       <strong>Nro:</strong> {onlineInvoice.number}
                     </p>
@@ -458,6 +841,32 @@ function App() {
                     <p>
                       <strong>Total:</strong> {onlineInvoice.totalAmount} Bs
                     </p>
+                    <p>
+                      <strong>Cantidad de entradas:</strong> {onlineInvoice.totalTickets}
+                    </p>
+                    <p>
+                      <strong>Código de entrada:</strong> {onlineInvoice.entryCode}
+                    </p>
+                    <div className="cashier-ticket-qr">
+                      <h4>QR de entrada (un solo uso)</h4>
+                      <img
+                        src={onlineInvoice.entryQrUrl}
+                        alt={`QR de entrada ${onlineInvoice.entryCode}`}
+                        className="ticket-qr-image"
+                      />
+                      <p className="ticket-qr-help">
+                        La validación la realiza solo personal autorizado en caja.
+                      </p>
+                    </div>
+                    <div className="invoice-download-actions">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={handleDownloadOnlineInvoice}
+                      >
+                        DESCARGAR FACTURA
+                      </button>
+                    </div>
                   </section>
                 ) : null}
               </div>
@@ -679,8 +1088,18 @@ function App() {
                     ) : null}
 
                     {cashierInvoice ? (
-                      <section className="invoice-card">
-                        <h3>Factura</h3>
+                      <section className="invoice-card cashier-invoice-card">
+                        <img
+                          src={CASHIER_INVOICE_IMAGE}
+                          alt="Imagen superior de la factura"
+                          className="cashier-invoice-banner"
+                        />
+                        <div className="cashier-invoice-header">
+                          <h3>Factura</h3>
+                          <span className="ticket-status-badge valid">
+                            Entrada: {cashierInvoice.entryStatus}
+                          </span>
+                        </div>
                         <p>
                           <strong>Nro:</strong> {cashierInvoice.number}
                         </p>
@@ -699,8 +1118,122 @@ function App() {
                         <p>
                           <strong>Total:</strong> {cashierInvoice.totalAmount} Bs
                         </p>
+                        <p>
+                          <strong>Cantidad de entradas:</strong> {cashierInvoice.totalTickets}
+                        </p>
+                        <p>
+                          <strong>Código de entrada:</strong> {cashierInvoice.entryCode}
+                        </p>
+                        <div className="cashier-ticket-qr">
+                          <h4>QR de entrada (un solo uso)</h4>
+                          <img
+                            src={cashierInvoice.entryQrUrl}
+                            alt={`QR de entrada ${cashierInvoice.entryCode}`}
+                            className="ticket-qr-image"
+                          />
+                          <p className="ticket-qr-help">
+                            Al escanear este QR, la entrada se marca automáticamente como{' '}
+                            <strong>USADO</strong>.
+                          </p>
+                          <a
+                            href={cashierInvoice.entryValidationUrl}
+                            className="ticket-validation-link"
+                          >
+                            Validar esta entrada
+                          </a>
+                        </div>
+                        <div className="invoice-download-actions">
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={handleDownloadCashierInvoice}
+                          >
+                            DESCARGAR FACTURA
+                          </button>
+                        </div>
                       </section>
                     ) : null}
+                  </>
+                )}
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {currentScreen === 'ticketValidation' ? (
+          <section className="screen-section">
+            <div className="ticket-validation-wrapper">
+              <div className="ticket-validation-card">
+                <h2>Validación de entrada</h2>
+                {!cashierLoggedIn ? (
+                  <>
+                    <p className="ticket-validation-message invalid">
+                      Validación restringida. Inicia sesión en caja para validar entradas.
+                    </p>
+                    <button
+                      type="button"
+                      className="subscribe-button"
+                      onClick={() => goToScreen('cashier')}
+                    >
+                      INICIAR SESIÓN EN CAJA
+                    </button>
+                    <button type="button" className="secondary-button" onClick={() => goToScreen('home')}>
+                      VOLVER AL INICIO
+                    </button>
+                  </>
+                ) : ticketValidationResult ? (
+                  <>
+                    <p
+                      className={`ticket-validation-message ${
+                        ticketValidationResult.status === 'INVALIDA' ? 'invalid' : 'ok'
+                      }`}
+                    >
+                      {ticketValidationResult.message}
+                    </p>
+                    {ticketValidationResult.ticket ? (
+                      <>
+                        <p>
+                          <strong>Código:</strong> {ticketValidationResult.ticket.code}
+                        </p>
+                        <p>
+                          <strong>Cliente:</strong> {ticketValidationResult.ticket.customerName}
+                        </p>
+                        <p>
+                          <strong>Detalle:</strong> {ticketValidationResult.ticket.summary}
+                        </p>
+                        <p>
+                          <strong>Estado:</strong> {ticketValidationResult.ticket.status}
+                        </p>
+                        {ticketValidationResult.ticket.usedAt ? (
+                          <p>
+                            <strong>Marcada como USADO:</strong>{' '}
+                            {ticketValidationResult.ticket.usedAt}
+                          </p>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p>
+                        <strong>Código:</strong> {ticketValidationResult.ticketCode}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => goToScreen('home')}
+                    >
+                      VOLVER AL INICIO
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p>No se recibió un código de entrada para validar.</p>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => goToScreen('home')}
+                    >
+                      VOLVER AL INICIO
+                    </button>
                   </>
                 )}
               </div>
