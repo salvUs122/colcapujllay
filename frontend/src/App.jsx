@@ -33,7 +33,11 @@ const buildQrUrl = (payload) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(payload)}`;
 
 const CASHIER_TICKETS_STORAGE_KEY = 'colca-cashier-tickets';
-const CASHIER_INVOICE_IMAGE = '/imagenes/fotoFactura.png';
+const invoiceImageModules = {
+  ...import.meta.glob('./images/fotoFactura.*', { eager: true, import: 'default' }),
+  ...import.meta.glob('./assets/images/fotoFactura.*', { eager: true, import: 'default' }),
+};
+const CASHIER_INVOICE_IMAGE = Object.values(invoiceImageModules)[0] || logoColca;
 
 const escapeHtml = (value) =>
   String(value ?? '')
